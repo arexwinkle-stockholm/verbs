@@ -281,11 +281,32 @@ function notesFor(v){
 let svVoices=[];
 function loadVoices(){
   if(!window.speechSynthesis)return;
-  svVoices=speechSynthesis.getVoices().filter(v=>/^sv/i.test(v.lang));
-  const sel=$('#voice');if(sel){sel.innerHTML='<option value="">Automatic</option>'+svVoices.map(v=>'<option value="'+esc(v.voiceURI)+'"'+(S.settings.voice===v.voiceURI?' selected':'')+'>'+esc(v.name)+'</option>').join('');}
+  const all=speechSynthesis.getVoices();
+  svVoices=all.filter(v=>/^sv/i.test(v.lang));
+  /* prefer a Google network voice by default; fall back to any network voice, then local */
+  svVoices.sort((a,b)=>{
+    const score=v=>(/google/i.test(v.name)?0:(!v.localService?1:2));
+    return score(a)-score(b);
+  });
+  const sel=$('#voice');if(sel){sel.innerHTML='<option value="">Automatic (best available)</option>'+svVoices.map(v=>'<option value="'+esc(v.voiceURI)+'"'+(S.settings.voice===v.voiceURI?' selected':'')+'>'+esc(v.name)+(v.localService?'':' (network)')+'</option>').join('');}
   const w=$('#voiceWarn');if(w)w.hidden=svVoices.length>0||!S.settings.audio;
+  const dbg=$('#voiceDebug');
+  if(dbg)dbg.innerHTML=all.length?('<table class="verbtable"><thead><tr><th>Name</th><th>Lang code</th><th>Local?</th></tr></thead><tbody>'+
+    all.map(v=>'<tr><td>'+esc(v.name)+'</td><td>'+esc(v.lang)+'</td><td>'+(v.localService?'Yes':'No (network)')+'</td></tr>').join('')+'</tbody></table>')
+    :'<p style="margin:0">This browser is not reporting any voices at all yet. Try clicking into the page first, or reload after installing a voice.</p>';
 }
 if(window.speechSynthesis){speechSynthesis.addEventListener('voiceschanged',loadVoices);}
+/* Chrome sometimes hands over its network voice list a few seconds after load,
+   without firing voiceschanged again — poll briefly to catch it. */
+(function pollVoices(){
+  let tries=0,lastCount=-1;
+  const iv=setInterval(()=>{
+    if(!window.speechSynthesis){clearInterval(iv);return;}
+    const n=speechSynthesis.getVoices().length;
+    if(n!==lastCount){lastCount=n;loadVoices();}
+    if(++tries>=15)clearInterval(iv); /* stop after ~7.5s */
+  },500);
+})();
 function speak(text){
   if(!S.settings.audio||!window.speechSynthesis)return;
   try{
@@ -398,8 +419,10 @@ function settingsHTML(){
    '<label><input type="checkbox" id="fastNext"'+(S.settings.fast?' checked':'')+'> In tests, move on as soon as I answer</label>'+
    '<label><input type="checkbox" id="enAudio"'+(S.settings.enAudio?' checked':'')+'> Also say the English translation aloud in training blocks</label>'+
    (('wakeLock' in navigator)?'<label><input type="checkbox" id="wakeOn"'+(S.settings.wake?' checked':'')+'> Keep screen awake during training</label>':'')+
-   '<button class="btn small" id="voiceTest">Play a test word</button></div>'+
-   '<p class="banner warn" id="voiceWarn" hidden style="margin:12px 0 0"><span>No Swedish voice was found on this device or browser. Add one in your system settings (iOS or Mac: Accessibility, Spoken Content, Voices; Windows: Time and language, Speech), or use Chrome, which often includes one.</span></p></div></div>';
+   '<button class="btn small" id="voiceTest">Play a test word</button>'+
+   '<button class="btn small" id="voiceRefresh">Refresh voice list</button></div>'+
+   '<p class="banner warn" id="voiceWarn" hidden style="margin:12px 0 0"><span>No Swedish voice was found on this device or browser. On Windows: Settings &rarr; Time and language &rarr; Speech &rarr; Manage voices &rarr; Add voices (this is different from adding Swedish as a display language). Then fully quit and reopen your browser, since it only reads the voice list once at startup. On iOS or Mac: Accessibility, Spoken Content, Voices.</span></p>'+
+   '<details style="margin-top:10px"><summary style="cursor:pointer">Show every voice this browser can see</summary><div id="voiceDebug" style="margin-top:8px"></div></details></div></div>';
 }
 function renderHome(){
   view={name:'home'};
@@ -626,7 +649,7 @@ document.addEventListener('change',e=>{
   else if(e.target.id==='enAudio'){S.settings.enAudio=e.target.checked;save();}
   else if(e.target.id==='wakeOn'){S.settings.wake=e.target.checked;save();if(e.target.checked&&view.name==='run')requestWake();else releaseWake();}
 });
-document.addEventListener('click',e=>{if(e.target.id==='voiceTest'){unlockAudio();speak('arbetar');}});
+document.addEventListener('click',e=>{if(e.target.id==='voiceTest'){unlockAudio();speak('arbetar');}else if(e.target.id==='voiceRefresh'){loadVoices();}});
 
 renderHome();
 window.__debug={get run(){return run;},get view(){return view;}};
